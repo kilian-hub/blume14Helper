@@ -454,7 +454,11 @@ class RentalManager:
 
         for txn in unclassified:
             amt = txn['amount']
-            if remaining_rent > 0 and amt > expected_nk:
+            if expected_nk == 0:
+                # No Nebenkosten expected — entire amount is Miete
+                miete = min(remaining_rent, amt)
+                remaining_rent -= miete
+            elif remaining_rent > 0 and amt > expected_nk:
                 # Cap rent per payment at the defined monthly rent
                 miete = min(expected_rent, remaining_rent, amt)
                 remaining_rent -= miete
@@ -503,11 +507,19 @@ class RentalManager:
         bank = self.bank_data
         name_parts = [p.strip().lower() for p in tenant.split(';')]
 
+        # Normalize ß→ss for matching
+        def normalize(s):
+            return s.replace('ß', 'ss')
+
+        desc_norm = bank['description'].str.lower().apply(lambda x: normalize(x) if isinstance(x, str) else '')
+        cp_norm = bank['counterparty'].str.lower().apply(lambda x: normalize(x) if isinstance(x, str) else '') if 'counterparty' in bank.columns else None
+
         mask = pd.Series(False, index=bank.index)
         for part in name_parts:
-            mask |= bank['description'].str.lower().str.contains(part, na=False)
-            if 'counterparty' in bank.columns:
-                mask |= bank['counterparty'].str.lower().str.contains(part, na=False)
+            part_norm = normalize(part)
+            mask |= desc_norm.str.contains(part_norm, na=False)
+            if cp_norm is not None:
+                mask |= cp_norm.str.contains(part_norm, na=False)
 
         tenant_txns = bank[mask].copy()
         incoming = tenant_txns[tenant_txns['amount'] > 0]
